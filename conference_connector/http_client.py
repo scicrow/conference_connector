@@ -22,8 +22,11 @@ def user_agent() -> str:
     contact = os.environ.get("CONFERENCE_CONNECTOR_CONTACT")
     if not contact:
         raise RuntimeError(
-            "Set CONFERENCE_CONNECTOR_CONTACT (e.g. an email address) before making network "
-            "requests. conference_connector identifies itself honestly to every server it talks to."
+            "Set CONFERENCE_CONNECTOR_CONTACT before making network requests. It's sent "
+            "only in the User-Agent header of requests to the sites you scrape (never "
+            "anywhere else) so a site admin who notices the traffic has someone to "
+            "contact -- it doesn't have to be a personal email, any contact string "
+            "works (a project alias, a lab website URL, etc)."
         )
     return f"conference_connector/0.1 (conference research tool; contact: {contact})"
 
