@@ -1,0 +1,22 @@
+[project]
+name = "conference_connector"
+version = "0.1.0"
+description = "Recon, scrape, and rank a conference's programme against your own research/outreach goals."
+requires-python = ">=3.11"
+dependencies = [
+    "httpx>=0.27",
+    "selectolax>=0.3",
+    "ftfy>=6.2",
+    "pydantic>=2.6",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+conference_connector = "conference_connector.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["conference_connector*"]

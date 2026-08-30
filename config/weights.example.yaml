@@ -1,0 +1,74 @@
+# Ranking weights. Copy to config/weights.yaml in your project directory and tune
+# freely -- re-run `conference_connector rank` after any change here, no re-ingest needed.
+
+# composite = (w_relevance*relevance + w_seniority*seniority + w_access*access) * geography_multiplier
+composite:
+  w_relevance: 0.45
+  w_seniority: 0.30
+  w_access: 0.25
+
+# Geography is a first-class ranking term ONLY if your goal has a location angle (a
+# target host institution, a visa-friendly region, a funding scheme's eligible
+# countries). If it doesn't, leave every tier list below empty -- everything then
+# falls into tier 4 with multiplier 1.0 and geography stops affecting the ranking.
+geography:
+  tier1_multiplier: 1.50
+  tier2_multiplier: 1.25
+  tier3_multiplier: 1.10
+  tier4_multiplier: 1.00
+  # Labels shown next to a person's name in people.md. Optional; if omitted, defaults
+  # to "tier 1" / "tier 2" / "tier 3" / "" (tier 4 gets no tag).
+  tier_labels:
+    1: "target-institution tier"
+    2: "target-region tier"
+    3: "eligible-region tier"
+    4: ""
+
+# Substring-matched against a person's affiliation string (case-insensitive).
+tier1_institutions:
+  - Example University
+  - Example Institute
+
+tier2_countries:
+  - Example Country
+tier2_institutions:
+  - Example National Lab
+
+tier3_countries:
+  - Neighbouring Country A
+  - Neighbouring Country B
+
+# Roles and how much each contributes to a person's "access quality" -- higher means
+# easier to actually get 10-20 minutes with this person at the conference. Tune this
+# to your own outreach style: if you're comfortable cold-emailing keynote speakers,
+# raise keynote_speaker; if poster presenters are your easiest in, poster_presenter
+# should stay high.
+access_by_role:
+  tutorial_organiser: 5
+  workshop_organiser: 5
+  session_chair: 4
+  keynote_speaker: 1
+  talk_last_author: 2
+  talk_presenter: 4
+  poster_last_author: 2
+  poster_presenter: 5
+
+# Seniority signal by role -- a stand-in for "how senior/established is this person",
+# used because conference_connector does not enrich against an external database (OpenAlex,
+# Google Scholar, ...) by default. If you add that enrichment yourself, prefer real
+# seniority signal over this table.
+seniority_by_role:
+  tutorial_organiser: 4
+  workshop_organiser: 4
+  session_chair: 5
+  keynote_speaker: 5
+  talk_last_author: 4
+  talk_presenter: 2
+  poster_last_author: 4
+  poster_presenter: 1
+
+# Output tiers by composite-score percentile (0-1), applied after sorting.
+tiers:
+  A_top_pct: 0.03   # e.g. "reach out before the conference"
+  B_top_pct: 0.15   # e.g. "seek out on site"
+  # everything else -> C
