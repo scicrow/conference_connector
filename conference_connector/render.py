@@ -6,11 +6,10 @@ from __future__ import annotations
 import csv
 import json
 
-import yaml
-
+from conference_connector import config
 from conference_connector.ingest import load_items
 from conference_connector.models import Item
-from conference_connector.paths import config_dir, outputs_dir, processed_dir
+from conference_connector.paths import outputs_dir, processed_dir
 
 TIER_LABEL = {
     "A": "Tier A -- reach out before the conference",
@@ -34,21 +33,13 @@ DEFAULT_GEO_LABELS = {1: "tier 1", 2: "tier 2", 3: "tier 3", 4: ""}
 
 
 def _conference_name() -> str:
-    profile_path = config_dir() / "profile.yaml"
-    if profile_path.exists():
-        profile = yaml.safe_load(profile_path.read_text())
-        if profile.get("conference"):
-            return profile["conference"]
-    return "the conference"
+    return config.load().get("conference") or "the conference"
 
 
 def _geo_labels() -> dict[int, str]:
-    weights_path = config_dir() / "weights.yaml"
-    if weights_path.exists():
-        weights = yaml.safe_load(weights_path.read_text())
-        labels = weights.get("geography", {}).get("tier_labels")
-        if labels:
-            return {int(k): v for k, v in labels.items()}
+    labels = config.load().get("ranking", {}).get("geography", {}).get("tier_labels")
+    if labels:
+        return {int(k): v for k, v in labels.items()}
     return DEFAULT_GEO_LABELS
 
 
@@ -70,7 +61,7 @@ def render_shortlist(item_scores: list[dict], items_by_id: dict[str, Item]) -> N
     lines = [
         f"# {conference} -- Shortlist ({len(rows)} items)",
         "",
-        "Scored by relevance to config/profile.yaml. Generated from a keyword-prefiltered "
+        "Scored by relevance to config/config.yaml. Generated from a keyword-prefiltered "
         "candidate pool, close-read and scored manually -- see "
         "skills/conference-scout/references/close-reading.md for the method.",
         "",
@@ -164,7 +155,7 @@ def render_people(people: list[dict], items_by_id: dict[str, Item]) -> None:
         "",
         "Derived from the shortlisted items (see shortlist.md), pivoted from items to the "
         "people behind them. Ranking = relevance x seniority x access-quality x geography "
-        "-- see config/weights.yaml for what each of those means for this profile.",
+        "-- see config/config.yaml for what each of those means for this profile.",
         "",
         "**Note on email addresses:** deliberately excluded from this list and every "
         "other output. Find contact details yourself when you decide to write.",

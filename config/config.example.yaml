@@ -1,0 +1,156 @@
+# Your project config -- one file, drives everything: the keyword prefilter, the
+# close-reading pass, and the person ranking.
+#
+# Copy this to config/config.yaml in your project directory and rewrite it for
+# yourself. Nothing in conference_connector reads config.example.yaml directly.
+#
+# You don't have to write this by hand: the conference-scout skill interviews you
+# about your research/outreach goals and writes this file for you (see
+# skills/conference-scout/SKILL.md). Editing it directly is the fallback/expert path
+# -- useful for re-tuning weights without re-running the interview.
+
+# Optional. Overrides the default User-Agent's project-URL-only identification with
+# your own contact, e.g. if you want a site admin to be able to reach you directly
+# rather than via this project's GitHub repo. Any contact string works (email, a lab
+# website, etc) -- not required. Can also be set per-shell via
+# CONFERENCE_CONNECTOR_CONTACT, which takes precedence over this if both are set.
+# contact: "you@example.com"
+
+# Shown in output headers ("# ECCB 2026 -- Shortlist..."). Optional; defaults to
+# "the conference" if omitted.
+conference: "Example Conf 2027"
+
+# Each thread is one research direction you'd recognise a match to, even if the
+# item's own vocabulary doesn't overlap with yours. `weight` scales how much a hit in
+# this thread contributes to the lexical prefilter score -- it is NOT the final
+# relevance score (that's the close-reading pass, done by a human/LLM reading the
+# actual text). `keywords` should over-generate on synonyms: false positives here
+# cost nothing (they just score low in the close read); false negatives are
+# unrecoverable, since nothing that misses the prefilter gets read at all.
+threads:
+  - id: topic_one
+    weight: 1.0
+    desc: >
+      One sentence describing this research direction in your own words -- used for
+      your own reference and for briefing an LLM doing the close-reading pass, not
+      parsed by any code.
+    keywords:
+      - "keyword phrase one"
+      - "a synonym for it"
+      - "an adjacent term that means roughly the same thing"
+
+  - id: topic_two
+    weight: 0.8
+    desc: >
+      A second thread. Weight it lower than topic_one if it's a secondary interest --
+      e.g. a past specialism you'd use for credibility but aren't building a research
+      programme around.
+    keywords:
+      - "another keyword phrase"
+      - "its synonym"
+
+# Notes for the close-reading pass -- free text, read by a human or an LLM, not
+# parsed. Use this to state what should NOT be a filter (e.g. "organism doesn't
+# matter, method does") so a close-reading pass doesn't over-index on surface
+# vocabulary that happens to differ from your own domain.
+domain_notes: >
+  Example: species/organism is not a filter criterion here -- score the method, not
+  the study system. A paper entirely about a different organism can still be a top
+  match if the underlying method transfers directly to your own work.
+
+# Free text describing who you are and what you're trying to get out of this
+# conference. Read by whoever does the close-reading pass and by whoever writes
+# advice.md / dossiers -- not parsed by any code, but keep it accurate; it shapes
+# every downstream judgement call.
+career_context: >
+  Example: 2nd-year PhD student building X using method Y. Strategic goal: identify a
+  potential host institution / collaborator / postdoc lab. Framing rule: how you want
+  to be perceived when you approach people (e.g. "as a specialist in Y whose
+  application domain happens to be Z", not "as someone looking for a job in Z").
+
+# Controls conference_connector.score's keyword prefilter.
+prefilter:
+  # Kinds that skip lexical filtering entirely and go straight into the candidate set.
+  # Keep a kind here if it's individually scarce and high-value enough that a global
+  # top-N cut across a mixed pool would crowd it out even though every item in it is
+  # worth reading -- this happened with talks at ECCB 2026 (91 talks vs. 846 posters;
+  # a combined cut left only 8/91 talks). When in doubt, check the raw kind counts
+  # (`conference_connector ingest <adapter>` prints them) before trusting a default here.
+  always_include_kinds: [tutorial, workshop, keynote]
+  # How many of the NOT-always-included items to keep, ranked by lexical score.
+  top_n_scored: 150
+
+# Ranking weights -- tune freely and re-run `conference_connector rank` (no re-ingest
+# needed).
+ranking:
+  # composite = (w_relevance*relevance + w_seniority*seniority + w_access*access) * geography_multiplier
+  composite:
+    w_relevance: 0.45
+    w_seniority: 0.30
+    w_access: 0.25
+
+  # Geography is a first-class ranking term ONLY if your goal has a location angle (a
+  # target host institution, a visa-friendly region, a funding scheme's eligible
+  # countries). If it doesn't, leave every tier list below empty -- everything then
+  # falls into tier 4 with multiplier 1.0 and geography stops affecting the ranking.
+  geography:
+    tier1_multiplier: 1.50
+    tier2_multiplier: 1.25
+    tier3_multiplier: 1.10
+    tier4_multiplier: 1.00
+    # Labels shown next to a person's name in people.md. Optional; if omitted,
+    # defaults to "tier 1" / "tier 2" / "tier 3" / "" (tier 4 gets no tag).
+    tier_labels:
+      1: "target-institution tier"
+      2: "target-region tier"
+      3: "eligible-region tier"
+      4: ""
+
+  # Substring-matched against a person's affiliation string (case-insensitive).
+  tier1_institutions:
+    - Example University
+    - Example Institute
+
+  tier2_countries:
+    - Example Country
+  tier2_institutions:
+    - Example National Lab
+
+  tier3_countries:
+    - Neighbouring Country A
+    - Neighbouring Country B
+
+  # Roles and how much each contributes to a person's "access quality" -- higher
+  # means easier to actually get 10-20 minutes with this person at the conference.
+  # Tune this to your own outreach style: if you're comfortable cold-emailing keynote
+  # speakers, raise keynote_speaker; if poster presenters are your easiest in,
+  # poster_presenter should stay high.
+  access_by_role:
+    tutorial_organiser: 5
+    workshop_organiser: 5
+    session_chair: 4
+    keynote_speaker: 1
+    talk_last_author: 2
+    talk_presenter: 4
+    poster_last_author: 2
+    poster_presenter: 5
+
+  # Seniority signal by role -- a stand-in for "how senior/established is this
+  # person", used because conference_connector does not enrich against an external
+  # database (OpenAlex, Google Scholar, ...) by default. If you add that enrichment
+  # yourself, prefer real seniority signal over this table.
+  seniority_by_role:
+    tutorial_organiser: 4
+    workshop_organiser: 4
+    session_chair: 5
+    keynote_speaker: 5
+    talk_last_author: 4
+    talk_presenter: 2
+    poster_last_author: 4
+    poster_presenter: 1
+
+  # Output tiers by composite-score percentile (0-1), applied after sorting.
+  tiers:
+    A_top_pct: 0.03   # e.g. "reach out before the conference"
+    B_top_pct: 0.15   # e.g. "seek out on site"
+    # everything else -> C

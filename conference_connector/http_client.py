@@ -2,8 +2,16 @@
 
 Caches raw response bytes under {data_dir}/raw/{source}/{key}.{ext} so re-runs never
 re-hit the target server. Rate-limits to one request at a time per host with a short
-delay, and identifies itself with a real contact -- this tool points agents at servers
-run by other people; it should never look anonymous.
+delay, and identifies itself in every request's User-Agent -- this tool points agents
+at servers run by other people; it should never look anonymous.
+
+By default that identification is just this project (name, version, a link back to
+the GitHub repo) -- enough for a site admin who notices unusual traffic to find out
+what's hitting their server and where to raise a concern, with no personal
+information from you required. If you want to add your own contact on top of that
+(not required), set it in config.yaml (`contact: you@example.com`, or any contact
+string -- a project alias, a lab website, etc.) or override it per-shell with
+CONFERENCE_CONNECTOR_CONTACT.
 """
 from __future__ import annotations
 
@@ -12,23 +20,21 @@ import time
 
 import httpx
 
+from conference_connector import __version__
 from conference_connector.paths import raw_dir
+
+PROJECT_URL = "https://github.com/scicrow/conference_connector"
 
 _MIN_DELAY_S = 0.6
 _last_request_time: dict[str, float] = {}
 
 
 def user_agent() -> str:
-    contact = os.environ.get("CONFERENCE_CONNECTOR_CONTACT")
-    if not contact:
-        raise RuntimeError(
-            "Set CONFERENCE_CONNECTOR_CONTACT before making network requests. It's sent "
-            "only in the User-Agent header of requests to the sites you scrape (never "
-            "anywhere else) so a site admin who notices the traffic has someone to "
-            "contact -- it doesn't have to be a personal email, any contact string "
-            "works (a project alias, a lab website URL, etc)."
-        )
-    return f"conference_connector/0.1 (conference research tool; contact: {contact})"
+    from conference_connector import config
+
+    contact = os.environ.get("CONFERENCE_CONNECTOR_CONTACT") or config.load().get("contact")
+    detail = f"+{PROJECT_URL}" + (f"; contact: {contact}" if contact else "")
+    return f"conference_connector/{__version__} ({detail})"
 
 
 def _throttle(host: str) -> None:

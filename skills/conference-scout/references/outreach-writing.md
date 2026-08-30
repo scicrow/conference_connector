@@ -18,7 +18,7 @@ this pipeline is for.
 ## Calibrate the ask to the tier
 
 `conference_connector.pivot` tiers people by composite score (typically A/B/C, configurable via
-`weights.yaml`'s `tiers` section). Tier meaning is whatever the project's weights
+`config.yaml`'s `ranking.tiers` section). Tier meaning is whatever the project's weights
 encode, but a common pattern:
 
 - **Top tier** (highest composite, usually senior + accessible + on-strategy): worth

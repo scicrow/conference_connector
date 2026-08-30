@@ -13,7 +13,7 @@ synonyms -- false positives here cost nothing (they just score low in the close 
 false negatives are unrecoverable, since nobody reads what this stage throws away.
 
 Item kinds that are individually scarce and high-value (see `always_include_kinds` in
-profile.yaml's `prefilter` section) skip the filter entirely and go straight to the
+config.yaml's `prefilter` section) skip the filter entirely and go straight to the
 candidate set. This matters: a global top-N cut across a mixed pool of many small items
 and few large ones can crowd the scarce, valuable kind out almost entirely even though
 each individual item in it is worth reading -- confirm your own always-include list
@@ -29,21 +29,16 @@ import json
 import re
 from collections import Counter
 
-import yaml
-
+from conference_connector import config
 from conference_connector.ingest import load_items
 from conference_connector.models import Item
-from conference_connector.paths import config_dir, interim_dir
+from conference_connector.paths import interim_dir
 
 CANDIDATES_JSONL = "candidates.jsonl"
 CANDIDATES_MD = "candidates_for_review.md"
 
 DEFAULT_ALWAYS_INCLUDE_KINDS = {"tutorial", "workshop", "keynote"}
 DEFAULT_TOP_N = 150
-
-
-def _load_profile() -> dict:
-    return yaml.safe_load((config_dir() / "profile.yaml").read_text())
 
 
 def _thread_keywords(profile: dict) -> dict[str, list[str]]:
@@ -67,7 +62,7 @@ def lexical_score(item: Item, keywords: dict[str, list[str]], weights: dict[str,
 
 
 def prefilter(items: list[Item], profile: dict | None = None) -> list[dict]:
-    profile = profile or _load_profile()
+    profile = profile or config.load()
     keywords = _thread_keywords(profile)
     weights = _thread_weights(profile)
     pf_config = profile.get("prefilter", {})

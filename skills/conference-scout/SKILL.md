@@ -14,8 +14,11 @@ where you have to look at real pages, real text, and real names and decide somet
 
 ## 0. Before anything else: is there a project directory?
 
-Look for `config/profile.yaml` and `config/weights.yaml` in the current directory. If
-missing, this is a new project:
+Look for `config/config.yaml` in the current directory. If missing, this is a new
+project. **Do not hand the user a blank YAML file and ask them to fill it in --
+interview them and write it yourself.** That's the whole point of driving this
+through a skill rather than a README: the user describes their work and goals in
+conversation, you translate that into the structured file the library needs.
 
 1. Interview the user. You need: what conference, what URL, what they're trying to
    get out of it (find a collaborator? a host lab? scout competitors? just triage a
@@ -23,17 +26,19 @@ missing, this is a new project:
    not just a topic name, but the vocabulary someone else might use for the same idea
    with different words. Weak, generic keywords are the single most common way a good
    candidate silently never gets read.
-2. Copy `config/profile.example.yaml` and `config/weights.example.yaml` from the
-   conference_connector install into this project's `config/`, then rewrite every field for this
-   user -- don't leave placeholder text in the real config.
+2. Copy `config/config.example.yaml` from the conference_connector install to this
+   project's `config/config.yaml`, then rewrite every field for this user from what
+   they told you -- don't leave placeholder text in the real config.
 3. If the goal has a geography/institution angle (target host, funding-scheme
-   eligibility, home turf), fill in the tier lists in `weights.yaml`. If it doesn't,
-   say so explicitly and leave every tier list empty -- don't invent a geographic
-   angle the user didn't ask for.
-4. `export CONFERENCE_CONNECTOR_CONTACT` must be set (an email or similar) before anything makes
-   a network request. Ask the user for one if it's not already in their shell.
+   eligibility, home turf), fill in the tier lists under `ranking` in `config.yaml`.
+   If it doesn't, say so explicitly and leave every tier list empty -- don't invent a
+   geographic angle the user didn't ask for.
+4. A network contact is optional, not required -- by default the tool identifies
+   itself to scraped sites with just this project's name and GitHub URL. Only set
+   `contact:` in `config.yaml` (or `export CONFERENCE_CONNECTOR_CONTACT`) if the user
+   wants to add their own on top of that.
 
-If a project directory already exists, read its configs and treat this as continuing
+If a project directory already exists, read its config and treat this as continuing
 or re-running an existing scout, not starting over.
 
 ## 1. Recon -- the checkpoint, not a formality
@@ -115,8 +120,9 @@ conference_connector render
 ```
 
 Check the output counts against what you expect (tier sizes, total shortlist size)
-before treating it as final. If a tier looks empty or absurdly large, the weights in
-`weights.yaml` probably need adjusting -- that's expected iteration, not a bug.
+before treating it as final. If a tier looks empty or absurdly large, the `ranking`
+weights in `config.yaml` probably need adjusting -- that's expected iteration, not a
+bug.
 
 ## 6. Outreach strategy (advice.md + dossiers)
 
@@ -132,7 +138,8 @@ user explicitly wants drafts, and never include email addresses in any output.
   material is fine (if asked for) but must be clearly marked unsent.
 - No email addresses in any output file, even when a source exposes them.
 - No touching authenticated/attendee-only endpoints.
-- Be a polite client: cache everything, throttle requests, identify honestly
-  (`CONFERENCE_CONNECTOR_CONTACT`).
+- Be a polite client: cache everything, throttle requests, identify honestly (the
+  default User-Agent already does this; never override it with something generic
+  enough to look anonymous).
 - Respect `robots.txt` for the sites you scrape -- recon reports it; read it before
   deciding to proceed with an adapter for that host.

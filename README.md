@@ -24,16 +24,6 @@ agent.
   (or `pip install -e /path/to/conference_connector` if you've cloned it locally and
   want to edit it)
 
-- [ ] **Set a contact string** -- required before any network request
-  ```
-  export CONFERENCE_CONNECTOR_CONTACT="you@example.com"
-  ```
-  This goes *only* into the `User-Agent` header of requests to the conference sites
-  you scrape (never anywhere else, never to this project) -- standard scraping
-  etiquette, so a site admin who notices unusual traffic has someone to contact
-  instead of an anonymous bot. It doesn't need to be a personal email; a project
-  alias or a lab website URL works just as well.
-
 - [ ] **Make a project directory** for this conference -- separate from this repo, one
   per conference/profile you scout
   ```
@@ -41,17 +31,24 @@ agent.
   mkdir -p config data outputs
   ```
 
-- [ ] **Copy the example configs in and rewrite them for yourself** -- this is the step
-  that actually shapes your results, don't skip rewriting the placeholder text
+- [ ] **Get a config.yaml.** Preferred: open this project directory with an agent
+  that has the `conference-scout` skill and tell it about the conference and what
+  you're trying to get out of it -- it interviews you and writes `config/config.yaml`
+  for you, including real keyword lists (not just topic names -- the vocabulary
+  someone else might use for the same idea). Manual fallback:
   ```
-  curl -o config/profile.yaml  https://raw.githubusercontent.com/scicrow/conference_connector/main/config/profile.example.yaml
-  curl -o config/weights.yaml  https://raw.githubusercontent.com/scicrow/conference_connector/main/config/weights.example.yaml
+  curl -o config/config.yaml https://raw.githubusercontent.com/scicrow/conference_connector/main/config/config.example.yaml
   ```
-  Edit `profile.yaml`: who you are, what research threads you care about, and real
-  keyword lists for each (see the comments in the file). Edit `weights.yaml` only if
-  your goal has a geography/institution angle (a target host, a funding scheme's
-  eligible countries) or you want to change how roles map to "how easy is this person
-  to approach."
+  and rewrite every field yourself -- who you are, your research threads and their
+  keywords, and (only if your goal has a geography/institution angle) the `ranking`
+  tier lists. This file is the one step that actually shapes your results; don't
+  leave the placeholder text in.
+
+- [ ] *(Optional)* **Add your own contact.** By default the tool identifies itself to
+  scraped sites with just its own name and GitHub URL -- nothing personal required.
+  If you'd rather a site admin be able to reach you directly, add `contact:
+  "you@example.com"` (or any contact string) to `config.yaml`, or set
+  `CONFERENCE_CONNECTOR_CONTACT` in your shell.
 
 - [ ] **Recon the conference site before scraping anything**
   ```
@@ -139,6 +136,14 @@ Everything upstream of that -- figuring out where a given conference's data live
 writing the adapter, close-reading the shortlisted abstracts, writing outreach
 strategy -- is judgement. That belongs to an agent working through the
 `conference-scout` skill (see `skills/conference-scout/SKILL.md`), not to a script.
+
+That includes `config.yaml` itself: you shouldn't have to hand-write YAML to describe
+your own research interests, so the intended way to get one is to just tell an agent
+about yourself and let the skill interview you and write the file. It's still a file
+rather than a fresh prompt on every run, though -- `ingest`, `prefilter`, and `rank`
+are separate commands, often run hours or days apart while you tune a weight, and
+something has to hold the answer in between. A file also means you can inspect and
+edit it directly to nudge the ranking, without a full re-interview each time.
 
 ## What this doesn't do
 

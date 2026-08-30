@@ -2,7 +2,7 @@
 
 Items are evidence; people are the deliverable. This module explodes each scored
 item's authors/chairs/organisers into (person, item, role) edges, resolves them to
-person records, and computes a composite score per weights.yaml:
+person records, and computes a composite score per config.yaml's `ranking` section:
 
     composite = (w_relevance*relevance + w_seniority*seniority + w_access*access)
                 * geography_multiplier
@@ -12,7 +12,7 @@ outreach goals -- item-level rankings are dominated by whoever happens to be
 presenting, which for a poster-heavy conference is mostly students, while the person
 worth contacting is often a last author or session chair who never tops an
 item-ranked list at all. Tune what "worth contacting" means via access_by_role and
-seniority_by_role in weights.yaml -- the roles and their weights encode your outreach
+seniority_by_role in config.yaml -- the roles and their weights encode your outreach
 goal, not a fact about the conference.
 """
 from __future__ import annotations
@@ -21,12 +21,11 @@ import json
 import math
 from collections import Counter
 
-import yaml
-
+from conference_connector import config
 from conference_connector.geography import classify, multiplier
 from conference_connector.ingest import load_items
 from conference_connector.models import Item
-from conference_connector.paths import config_dir, processed_dir
+from conference_connector.paths import processed_dir
 
 ITEM_SCORES_FILENAME = "item_scores.json"
 PEOPLE_FILENAME = "people.json"
@@ -45,8 +44,8 @@ def people_path():
     return processed_dir() / PEOPLE_FILENAME
 
 
-def _load_weights() -> dict:
-    return yaml.safe_load((config_dir() / "weights.yaml").read_text())
+def _load_ranking() -> dict:
+    return config.load()["ranking"]
 
 
 def _load_item_scores() -> dict[str, dict]:
@@ -62,7 +61,7 @@ def _item_topic_score(scored: dict) -> float:
 
 
 def build_people() -> list[dict]:
-    weights = _load_weights()
+    weights = _load_ranking()
     access_by_role = weights["access_by_role"]
     seniority_by_role = weights["seniority_by_role"]
     composite_w = weights["composite"]
