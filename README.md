@@ -76,6 +76,16 @@ agent.
 - [ ] **Check `outputs/`** -- `shortlist.md` and `people.md` are the main deliverables;
   `items.csv` / `people.csv` are the same data for a spreadsheet.
 
+- [ ] *(Optional)* **Generate a phone-friendly reference card** for the actual event:
+  ```
+  conference_connector card --pdf
+  ```
+  Produces `outputs/reference_card.html` (and `.pdf`, if a local Chrome/Chromium is
+  found) -- a day-by-day schedule plus one card per Tier A/B person with their
+  posters/talks (board/room/time) and, if `outputs/dossiers/*.md` exist, their
+  hand-written hook/opener/ask. Designed to survive being AirDropped to a phone and
+  read while walking around a poster hall.
+
 The rest of this README explains *why* each piece works the way it does. If something
 above didn't make sense, the answer is probably in one of the sections below.
 
@@ -89,6 +99,7 @@ conference_connector prefilter          # keyword filter -> data/interim/candida
 conference_connector validate <adapter> # sanity-check adapter output (coverage, mojibake, outliers)
 conference_connector rank               # item_scores.json -> data/processed/people.json
 conference_connector render             # -> outputs/{shortlist,people}.md, {items,people}.csv
+conference_connector card [--tiers A,B] [--pdf]  # -> outputs/reference_card.{html,pdf}
 ```
 
 `conference_connector` resolves `config/`, `data/`, and `outputs/` relative to your
@@ -100,6 +111,28 @@ one you made in the Quickstart above.
 There is no automated LLM-scoring step. Scoring hundreds of abstracts against a chat
 subscription (not API credits) means a human or an LLM-in-the-loop session actually
 reads them -- see `skills/conference-scout/references/close-reading.md`.
+
+### The reference card
+
+`card` is the last, optional stage -- it doesn't compute anything new, just assembles
+what `rank` and (optionally) the outreach-writing step already produced into something
+readable on a phone during the event itself: a day-by-day schedule across everyone
+included, plus one card per person with their items' day/time/room/board.
+
+It reads `outputs/dossiers/*.md` opportunistically -- if a project has hand-written
+dossiers (see `skills/conference-scout/references/outreach-writing.md`), their hook/
+opening-line/ask sections get pulled in verbatim (matched by loose keyword, not an
+exact header, so different dossier-writing styles still work); anyone without one
+still gets a card, using `item_scores.json`'s `why` for their best-scoring item as the
+one-line summary instead. `config.yaml`'s `card.exclude_people` list is there for data
+artifacts that resolve as a "person" but aren't one (a corporate author string like
+"The Foo Consortium" showing up as a last author, for instance) -- there's no way to
+detect that automatically, so check `outputs/people.md` for anything like it first.
+
+PDF export shells out to a local Chrome/Chromium if it can find one (checked in the
+usual install locations on macOS/Linux/Windows); without one, `card` still writes a
+complete, usable HTML file and tells you to use your browser's Print > Save as PDF
+instead of failing.
 
 ### Recon: the checkpoint
 

@@ -132,6 +132,15 @@ The core discipline there: ground every claim in a real scored item and a real q
 never write anything that could be mistaken for a ready-to-send message unless the
 user explicitly wants drafts, and never include email addresses in any output.
 
+## 7. Offer the reference card
+
+Once `render` (and, if written, dossiers) exist, offer to run
+`conference_connector card --pdf`. It's the thing a user actually opens on their phone
+at the event -- worth surfacing even if they didn't ask, especially close to the
+conference date. Check `outputs/people.md` first for any non-person entries (a
+corporate author string resolved as a "person") and add them to `config.yaml`'s
+`card.exclude_people` before generating.
+
 ## Hard constraints, always
 
 - No outreach performed by you, ever, regardless of what the user's goal is. Draft

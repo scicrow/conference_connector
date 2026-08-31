@@ -154,3 +154,11 @@ ranking:
     A_top_pct: 0.03   # e.g. "reach out before the conference"
     B_top_pct: 0.15   # e.g. "seek out on site"
     # everything else -> C
+
+# Controls `conference_connector card` (the phone/print reference-card generator).
+card:
+  # Names to leave off the card even though they were ranked -- e.g. a corporate
+  # author string ("The Foo Consortium") that got resolved as a "person" because it
+  # appeared in an author list. Check outputs/people.md for anything like this before
+  # generating the card; there's no way to detect it automatically.
+  exclude_people: []

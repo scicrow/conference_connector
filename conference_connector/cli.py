@@ -6,8 +6,15 @@
     conference_connector prefilter                  # keyword-prefilter -> data/interim/candidates_for_review.md
     conference_connector rank                       # item_scores.json (hand-written) -> people.json
     conference_connector render                     # item_scores.json + people.json -> outputs/*
+    conference_connector card [--tiers A,B] [--pdf] # people.json -> outputs/reference_card.{html,pdf}
 
 <adapter> is a registered adapter slug (see conference_connector.adapters), e.g. "eccb2026".
+
+`card` builds a phone-browsable "who to see" reference: a day-by-day schedule plus one
+card per person (day/time/room/board for every item), pulling in outputs/dossiers/*.md
+if present for a hand-written hook/opener/ask, and falling back to item_scores.json's
+`why` otherwise. --tiers defaults to A,B; --pdf attempts a local Chrome/Chromium for
+PDF export (falls back to HTML-only with instructions if none is found).
 
 Note on scoring: there is no `conference_connector score` command that calls an LLM API over the
 full item pool. By design, the close-reading/scoring pass over the keyword-prefiltered
@@ -17,8 +24,9 @@ data/processed/item_scores.json -- see skills/conference-scout/references/close-
 Re-run `rank` after editing item_scores.json to rebuild people.json from it.
 
 Environment:
-    CONFERENCE_CONNECTOR_CONTACT       required for any network request (e.g. your email) --
-                             identifies this tool honestly to servers it talks to.
+    CONFERENCE_CONNECTOR_CONTACT       optional, for any network request -- adds your
+                             own contact on top of the default User-Agent (which
+                             already identifies the tool + its GitHub URL).
     CONFERENCE_CONNECTOR_CONFIG_DIR    default: ./config
     CONFERENCE_CONNECTOR_DATA_DIR      default: ./data
     CONFERENCE_CONNECTOR_OUTPUT_DIR    default: ./outputs
@@ -76,6 +84,14 @@ def main() -> None:
         from conference_connector import render
 
         render.main()
+
+    elif cmd == "card":
+        from conference_connector import card
+
+        tiers_arg = next((a.split("=", 1)[1] for a in args if a.startswith("--tiers=")), "A,B")
+        tiers = tuple(t.strip() for t in tiers_arg.split(",") if t.strip())
+        make_pdf = "--pdf" in args
+        card.main(tiers=tiers, make_pdf=make_pdf)
 
     else:
         print(f"Unknown command: {cmd}\n")

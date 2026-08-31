@@ -25,6 +25,16 @@ SESSIONS = ["A", "B", "C"]
 # Board id: session letter, dash, track code (may itself contain dots/letters), dot, number.
 BOARD_RE = re.compile(r"^([A-C])-(.+)\.(\d{2,3})$")
 
+# Each poster session (the board-id's leading letter) is staffed at one fixed
+# conference-wide window -- confirmed against the ECCB 2026 programme. Decoding this
+# gives every poster a day/time for free, with no extra request: without it, posters
+# have no schedule info at all and can't appear in any chronological view.
+_SESSION_WINDOWS = {
+    "A": ("Monday 31 August", "12:00", "13:30"),
+    "B": ("Tuesday 1 September", "16:15", "17:45"),
+    "C": ("Wednesday 2 September", "11:30", "13:00"),
+}
+
 _ENTRY_SPLIT_RE = re.compile(r"<div class='well well-sm'>")
 _TITLE_RE = re.compile(r"<strong>([^<]+)</strong>")
 _TRACK_RE = re.compile(r"<strong>Track:</strong>\s*([^<]+)")
@@ -117,6 +127,12 @@ def _parse_entry(chunk: str, track_hint: str) -> Item | None:
     abstract_m = _ABSTRACT_RE.search(chunk)
     abstract = strip_tags(abstract_m.group(1)) if abstract_m else ""
 
+    day = start = end = None
+    if board_id:
+        window = _SESSION_WINDOWS.get(board_id[0])
+        if window:
+            day, start, end = window
+
     item_key = board_id or re.sub(r"\W+", "-", title.lower()).strip("-")[:80]
     return Item(
         item_id=f"poster:{item_key}",
@@ -125,6 +141,9 @@ def _parse_entry(chunk: str, track_hint: str) -> Item | None:
         abstract=abstract,
         track=track,
         board_id=board_id,
+        day=day,
+        start=start,
+        end=end,
         authors=authors,
         source="S1",
         url=BASE_URL,
