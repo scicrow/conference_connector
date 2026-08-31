@@ -8,7 +8,7 @@ for the schema.
 
 Writing this file by hand is the fallback path, not the intended one -- the
 conference-scout skill interviews you about your research and outreach goals and
-writes it for you (see skills/conference-scout/SKILL.md). The file exists as the
+writes it for you (see conference_connector/skills/conference-scout/SKILL.md). The file exists as the
 stable, reproducible artifact underneath that conversation: ingest/prefilter/rank/
 render run as separate commands, sometimes hours or days apart while you tune
 weights, and something has to hold the answer in between -- re-prompting an LLM for
@@ -47,3 +47,19 @@ def load() -> dict:
 def reload() -> None:
     global _cache
     _cache = None
+
+
+DEFAULT_GEO_LABELS = {1: "tier 1", 2: "tier 2", 3: "tier 3", 4: ""}
+
+
+def conference_name() -> str:
+    """Display name for output headers. Both `render` and `card` need this, so it
+    lives here rather than being imported across sibling modules."""
+    return load().get("conference") or "the conference"
+
+
+def geo_labels() -> dict[int, str]:
+    labels = load().get("ranking", {}).get("geography", {}).get("tier_labels")
+    if labels:
+        return {int(k): v for k, v in labels.items()}
+    return DEFAULT_GEO_LABELS

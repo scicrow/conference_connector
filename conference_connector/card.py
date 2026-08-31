@@ -5,7 +5,7 @@ This is the last stage of the pipeline, downstream of `rank`. It doesn't do anyt
 that requires reading text or judgement -- the judgement already happened during the
 close-read (item_scores.json's `why`) and, optionally, during outreach-writing
 (outputs/dossiers/*.md, if the skill wrote them per
-skills/conference-scout/references/outreach-writing.md). This module just assembles
+conference_connector/skills/conference-scout/references/outreach-writing.md). This module just assembles
 what already exists into something browsable on a phone at the actual event: a
 day-by-day schedule plus one card per person with their sessions' day/time/room/board.
 
@@ -30,13 +30,12 @@ from conference_connector import config
 from conference_connector.ingest import load_items
 from conference_connector.pivot import item_scores_path, people_path
 from conference_connector.paths import outputs_dir
-from conference_connector.render import ROLE_LABEL, TIER_LABEL, _conference_name, _geo_labels
+from conference_connector.render import ROLE_LABEL, TIER_LABEL
 
 TIER_COLORS = {
     "A": ("#b8860b", "#fffdf7"),
     "B": ("#4a6fa5", "#f7fafd"),
     "C": ("#5a8f5a", "#f5faf5"),
-    "D": ("#8a4a9a", "#faf5fb"),
 }
 _DEFAULT_TIER_COLOR = ("#777777", "#f7f7f7")
 
@@ -48,25 +47,51 @@ KIND_COLORS = {
     "keynote": ("#f5dde0", "#7a1d3f"),
 }
 
-_MONTHS = {
-    m: i + 1
-    for i, m in enumerate(
-        ["january", "february", "march", "april", "may", "june", "july",
-         "august", "september", "october", "november", "december"]
-    )
-}
-_DATE_RE = re.compile(r"(\d{1,2})\s+(" + "|".join(_MONTHS) + r")", re.I)
+_MONTH_NAMES = [
+    "january", "february", "march", "april", "may", "june", "july",
+    "august", "september", "october", "november", "december",
+]
+_MONTHS = {m: i + 1 for i, m in enumerate(_MONTH_NAMES)}
+# Three-letter abbreviations too ("Mar 3", "3 Sep"), which are at least as common on
+# conference programmes as the full month name.
+_MONTHS.update({m[:3]: i + 1 for i, m in enumerate(_MONTH_NAMES)})
+
+_MONTH_ALT = "|".join(sorted(_MONTHS, key=len, reverse=True))
+# Day-month ("31 August", "3 Sep") and month-day ("August 31", "Mar 3") are both in
+# wide use and neither is safe to assume -- ECCB writes the first, most US
+# conferences write the second. ISO dates appear in machine-generated programmes.
+_DATE_DM_RE = re.compile(r"\b(\d{1,2})\s+(" + _MONTH_ALT + r")\b", re.I)
+_DATE_MD_RE = re.compile(r"\b(" + _MONTH_ALT + r")\s+(\d{1,2})\b", re.I)
+_DATE_ISO_RE = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
+
+_UNSCHEDULED = (99, 99)
 
 
 def _date_key(day: str | None) -> tuple[int, int]:
-    """Parse a human day string ("Monday 31 August") into a (month, day) sort key,
-    independent of weekday naming or which conference/year this is."""
+    """Parse a human day string into a (month, day) sort key, independent of weekday
+    naming, month-name abbreviation, field order, or which conference/year this is.
+
+    Unparseable or missing days sort last rather than raising -- a conference that
+    labels days "Day 1"/"Day 2" or omits them entirely is a real case, and the card
+    still has to render something sensible.
+    """
     if not day:
-        return (99, 99)
-    m = _DATE_RE.search(day.lower())
-    if not m:
-        return (99, 99)
-    return (_MONTHS[m.group(2).lower()], int(m.group(1)))
+        return _UNSCHEDULED
+    s = day.lower()
+
+    iso = _DATE_ISO_RE.search(s)
+    if iso:
+        return (int(iso.group(2)), int(iso.group(3)))
+
+    dm = _DATE_DM_RE.search(s)
+    if dm:
+        return (_MONTHS[dm.group(2)], int(dm.group(1)))
+
+    md = _DATE_MD_RE.search(s)
+    if md:
+        return (_MONTHS[md.group(1)], int(md.group(2)))
+
+    return _UNSCHEDULED
 
 
 def _time_key(start: str | None) -> int:
@@ -176,7 +201,7 @@ def build_card_data(
     items = {it.item_id: it for it in load_items()}
     item_scores = {row["item_id"]: row for row in json.loads(item_scores_path().read_text())}
     dossiers_dir = dossiers_dir or (outputs_dir() / "dossiers")
-    geo_labels = _geo_labels()
+    geo_labels = config.geo_labels()
 
     out = []
     for p in people:
@@ -193,7 +218,10 @@ def build_card_data(
                 "kind": it.kind, "title": it.title, "day": day, "time": time, "loc": loc,
                 "_sort": (_date_key(day), _time_key(it.start)),
             })
-        rows.sort(key=lambda r: r["_sort"])
+        # Sort by slot *and* location so rows sharing a slot are adjacent --
+        # _merge_identical_slots only merges neighbours, so two items in the same
+        # room separated by one in a different room would otherwise not merge.
+        rows.sort(key=lambda r: (r["_sort"], r["kind"], r["loc"]))
         rows = _merge_identical_slots(rows)
 
         slug = _slugify(p["name"])
@@ -266,22 +294,33 @@ def _person_card_html(p: dict) -> str:
     """
 
 
+UNSCHEDULED_HEADING = "Day/time not listed in the programme"
+
+
 def _quick_index_html(people: list[dict]) -> str:
+    # (sort_time, name, tier, item) -- tier is carried here rather than looked up
+    # later, both to avoid rescanning `people` per row and because a name lookup
+    # would silently pick the wrong person if two attendees share a name.
     by_day: dict[str, list[tuple]] = {}
     for p in people:
         for it in p["items"]:
-            by_day.setdefault(it["day"], []).append((it["_sort"][1] if "_sort" in it else 0, p["name"], it))
-    days_sorted = sorted(by_day.keys(), key=_date_key)
+            day = it["day"] or UNSCHEDULED_HEADING
+            by_day.setdefault(day, []).append(
+                (it.get("_sort", ((99, 99), 0))[1], p["name"], p["tier"], it)
+            )
+
+    # Unscheduled items go last, but they must still appear: dropping them meant a
+    # keynote with no parsed day vanished from the schedule view entirely.
+    days_sorted = sorted(
+        by_day.keys(), key=lambda d: (d == UNSCHEDULED_HEADING, _date_key(d))
+    )
 
     out = []
     for day in days_sorted:
-        if not day:
-            continue
         entries = by_day[day]
         entries.sort(key=lambda e: e[0])
         out.append(f"<h3 class='day-head'>{_e(day)}</h3>")
-        for _, name, it in entries:
-            tier = next((p["tier"] for p in people if p["name"] == name), "?")
+        for _, name, tier, it in entries:
             color = TIER_COLORS.get(tier, _DEFAULT_TIER_COLOR)[0]
             title_text = "; ".join(it["titles"])
             out.append(
@@ -430,10 +469,17 @@ def render_pdf(html_path: Path, pdf_path: Path) -> bool:
 
 
 def main(tiers: tuple[str, ...] = ("A", "B"), make_pdf: bool = False, exclude: set[str] | None = None) -> None:
+    from conference_connector.ingest import items_path
+    from conference_connector.preconditions import require_file
+
+    require_file(items_path(), "conference_connector ingest <adapter>", "the ingested item list")
+    require_file(item_scores_path(), "conference_connector prefilter", "your hand-written item scores")
+    require_file(people_path(), "conference_connector rank", "the ranked people list")
+
     if exclude is None:
         exclude = set(config.load().get("card", {}).get("exclude_people", []))
     data = build_card_data(tiers=tiers, exclude=exclude)
-    conference_name = _conference_name()
+    conference_name = config.conference_name()
     html_str = render_html(data, conference_name, tiers)
 
     out_dir = outputs_dir()

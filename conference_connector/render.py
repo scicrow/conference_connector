@@ -29,18 +29,8 @@ ROLE_LABEL = {
     "co_author": "Co-author",
 }
 
-DEFAULT_GEO_LABELS = {1: "tier 1", 2: "tier 2", 3: "tier 3", 4: ""}
-
-
-def _conference_name() -> str:
-    return config.load().get("conference") or "the conference"
-
-
-def _geo_labels() -> dict[int, str]:
-    labels = config.load().get("ranking", {}).get("geography", {}).get("tier_labels")
-    if labels:
-        return {int(k): v for k, v in labels.items()}
-    return DEFAULT_GEO_LABELS
+_conference_name = config.conference_name
+_geo_labels = config.geo_labels
 
 
 def _load_items_by_id() -> dict[str, Item]:
@@ -63,7 +53,7 @@ def render_shortlist(item_scores: list[dict], items_by_id: dict[str, Item]) -> N
         "",
         "Scored by relevance to config/config.yaml. Generated from a keyword-prefiltered "
         "candidate pool, close-read and scored manually -- see "
-        "skills/conference-scout/references/close-reading.md for the method.",
+        "conference_connector/skills/conference-scout/references/close-reading.md for the method.",
         "",
     ]
 
@@ -210,6 +200,19 @@ def render_people_csv(people: list[dict]) -> None:
 
 
 def main() -> None:
+    from conference_connector.ingest import items_path
+    from conference_connector.preconditions import require_file
+
+    require_file(items_path(), "conference_connector ingest <adapter>", "the ingested item list")
+    require_file(
+        processed_dir() / "item_scores.json",
+        "conference_connector prefilter  (then hand-write item_scores.json)",
+        "your hand-written item scores",
+    )
+    require_file(
+        processed_dir() / "people.json", "conference_connector rank", "the ranked people list"
+    )
+
     outputs_dir().mkdir(parents=True, exist_ok=True)
     item_scores = json.loads((processed_dir() / "item_scores.json").read_text())
     people = json.loads((processed_dir() / "people.json").read_text())

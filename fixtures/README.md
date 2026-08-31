@@ -7,4 +7,4 @@ server every time you tweak a regex.
 
 Nothing here is loaded automatically; point your adapter's tests or a throwaway script
 at these files directly while developing, per
-`skills/conference-scout/references/adapter-authoring.md`.
+`conference_connector/skills/conference-scout/references/adapter-authoring.md`.

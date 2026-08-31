@@ -2,7 +2,7 @@
 
 conference_connector ships one reference adapter (eccb2026) so there's a worked example to read
 and copy. Real usage is expected to add a project-local adapter for whatever conference
-the user actually cares about -- see skills/conference-scout/references/adapter-authoring.md.
+the user actually cares about -- see conference_connector/skills/conference-scout/references/adapter-authoring.md.
 
 A project can register its own adapter without editing this file by calling
 `register(slug, module)` before `get(slug)` is called (e.g. from a small bootstrap

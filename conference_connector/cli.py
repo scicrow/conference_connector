@@ -1,5 +1,7 @@
 """conference_connector -- conference research pipeline.
 
+    conference_connector init [--force]             # scaffold config/ data/ outputs/ + a starter config.yaml
+    conference_connector install-skill [--user] [--force]   # copy the conference-scout skill into .claude/skills
     conference_connector recon <url>                # look at a page before scraping anything -- run this FIRST
     conference_connector ingest <adapter> [--refresh]
     conference_connector validate <adapter> [--refresh]
@@ -20,7 +22,7 @@ Note on scoring: there is no `conference_connector score` command that calls an 
 full item pool. By design, the close-reading/scoring pass over the keyword-prefiltered
 candidates (data/interim/candidates_for_review.md) is done by a human or an
 LLM-in-the-loop session reading the file directly and hand-writing
-data/processed/item_scores.json -- see skills/conference-scout/references/close-reading.md.
+data/processed/item_scores.json -- see conference_connector/skills/conference-scout/references/close-reading.md.
 Re-run `rank` after editing item_scores.json to rebuild people.json from it.
 
 Environment:
@@ -37,6 +39,18 @@ import sys
 
 
 def main() -> None:
+    from conference_connector.preconditions import PipelineError
+
+    try:
+        _dispatch()
+    except PipelineError as e:
+        # Expected, user-fixable situations (wrong order, missing config). Print the
+        # guidance plainly -- a traceback here would bury it.
+        print(f"\n{e}\n")
+        sys.exit(1)
+
+
+def _dispatch() -> None:
     if len(sys.argv) < 2:
         print(__doc__)
         sys.exit(1)
@@ -44,9 +58,21 @@ def main() -> None:
     cmd = sys.argv[1]
     args = sys.argv[2:]
     refresh = "--refresh" in args
+    force = "--force" in args
     positional = [a for a in args if not a.startswith("--")]
 
-    if cmd == "recon":
+    if cmd == "init":
+        from conference_connector import scaffold
+
+        scaffold.init(force=force)
+
+    elif cmd == "install-skill":
+        from conference_connector import scaffold
+
+        scope = "user" if "--user" in args else "project"
+        scaffold.install_skill(scope=scope, force=force)
+
+    elif cmd == "recon":
         if not positional:
             print("usage: conference_connector recon <url>")
             sys.exit(1)

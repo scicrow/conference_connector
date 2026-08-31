@@ -7,7 +7,7 @@ some infrastructure (transition.iscb.org) but have NOT been verified to use the 
 URL grammar, board-ID format, or page markup -- treat this as a worked example and a
 starting point for writing their adapters, not as a drop-in.
 
-See skills/conference-scout/references/adapter-authoring.md for the four real bugs
+See conference_connector/skills/conference-scout/references/adapter-authoring.md for the four real bugs
 found building this (each one silently dropped or mis-parsed a chunk of the data) and
 the checks that would have caught them.
 """

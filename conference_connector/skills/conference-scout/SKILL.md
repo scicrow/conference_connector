@@ -26,9 +26,9 @@ conversation, you translate that into the structured file the library needs.
    not just a topic name, but the vocabulary someone else might use for the same idea
    with different words. Weak, generic keywords are the single most common way a good
    candidate silently never gets read.
-2. Copy `config/config.example.yaml` from the conference_connector install to this
-   project's `config/config.yaml`, then rewrite every field for this user from what
-   they told you -- don't leave placeholder text in the real config.
+2. Run `conference_connector init` to scaffold the directories and drop in a starter
+   `config/config.yaml` (and `my_adapter.py`), then rewrite every field of the config
+   for this user from what they told you -- don't leave placeholder text in it.
 3. If the goal has a geography/institution angle (target host, funding-scheme
    eligibility, home turf), fill in the tier lists under `ranking` in `config.yaml`.
    If it doesn't, say so explicitly and leave every tier list empty -- don't invent a
@@ -79,9 +79,16 @@ Work fixture-first: save a couple of real pages to `fixtures/<slug>/`, write aga
 those, run `conference_connector.validate.validate()` on the parsed output, only then point the
 adapter at the live site for a full ingest.
 
-Write the adapter as a project-local Python module (not inside the conference_connector install)
-implementing `conference_connector.adapters.base.Adapter` (a `SLUG` and `fetch_all(refresh)`).
-Register it with `conference_connector.adapters.register(slug, module)`.
+Start from `my_adapter.py` in the project directory (written by `conference_connector
+init`) rather than a blank file -- it already has the structure, the three edit points,
+and a `__main__` block that compares your parsed count against the number of entry
+markers in the raw HTML and runs validation. That count comparison catches the single
+most common adapter bug, so keep it and run `python my_adapter.py` after each change.
+
+The adapter lives in the project directory, not inside the conference_connector
+install, and implements `conference_connector.adapters.base.Adapter` (a `SLUG` and
+`fetch_all(refresh)`). Register it with
+`conference_connector.adapters.register(slug, module)`.
 
 ## 3. Ingest and validate
 

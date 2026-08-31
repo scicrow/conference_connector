@@ -202,6 +202,18 @@ def build_people() -> list[dict]:
 
 
 def main() -> None:
+    from conference_connector.ingest import items_path
+    from conference_connector.preconditions import require_config, require_file
+
+    require_config("ranking")
+    require_file(items_path(), "conference_connector ingest <adapter>", "the ingested item list")
+    require_file(
+        item_scores_path(),
+        "conference_connector prefilter  (then hand-write item_scores.json from "
+        "data/interim/candidates_for_review.md)",
+        "your hand-written item scores",
+    )
+
     people = build_people()
     processed_dir().mkdir(parents=True, exist_ok=True)
     people_path().write_text(json.dumps(people, indent=2), encoding="utf-8")

@@ -76,10 +76,21 @@ _LINK_RE = re.compile(r'<a\b[^>]*href=["\']([^"\']+)["\'][^>]*>(.*?)</a>', re.S 
 _IFRAME_RE = re.compile(r'<iframe\b[^>]*src=["\']([^"\']+)["\']', re.I)
 _TAG_RE = re.compile(r"<[^>]+>")
 _TIME_RE = re.compile(r"\b\d{1,2}:\d{2}\b")
+# Script/style *contents* are not markup and not visible text -- they must be removed
+# before measuring how much real text a page has. Stripping tags alone leaves the whole
+# JS bundle and any embedded JSON counted as "text", which on a modern SPA inflates the
+# text-to-HTML ratio by orders of magnitude and inverts the hydration verdict.
+_SCRIPT_STYLE_RE = re.compile(r"(?is)<(script|style)\b[^>]*>.*?</\1\s*>")
 
 
 def _strip_tags(s: str) -> str:
+    """Tags only -- for short attribute/anchor fragments that contain no script."""
     return _TAG_RE.sub(" ", s).strip()
+
+
+def _visible_text(html: str) -> str:
+    """Text a reader would actually see: script/style bodies removed, then tags."""
+    return _TAG_RE.sub(" ", _SCRIPT_STYLE_RE.sub(" ", html)).strip()
 
 
 def _detect_platform(html: str) -> list[str]:
@@ -123,32 +134,48 @@ def _classify_links(html: str, base_url: str, max_links: int) -> list[dict]:
 
 
 def _hydration_heuristic(html: str) -> dict:
-    visible_text = _strip_tags(html)
+    visible_text = _visible_text(html)
     size = len(html)
     text_len = len(visible_text)
-    time_hits = len(_TIME_RE.findall(html))
+    script_bytes = size - len(_SCRIPT_STYLE_RE.sub(" ", html))
+    # Count time patterns in visible text only: a JS bundle is full of incidental
+    # digit pairs, and counting those made every SPA look like it had a schedule.
+    time_hits = len(_TIME_RE.findall(visible_text))
     ratio = text_len / size if size else 0
-    likely_hydrated = size > 50_000 and ratio < 0.05
+
+    # Two independent signals, because either alone has a blind spot: the ratio misses
+    # a small page that is entirely JS, and the absolute floor misses a huge page that
+    # happens to carry a little boilerplate text.
+    thin_ratio = size > 50_000 and ratio < 0.05
+    thin_absolute = text_len < 3_000 and script_bytes > text_len
+    likely_hydrated = thin_ratio or thin_absolute
+
+    if likely_hydrated:
+        note = (
+            f"Only {text_len} chars of visible text against {script_bytes} bytes of "
+            "script/style -- the content is almost certainly fetched or rendered by JS. "
+            "Look for an API call in embedded_data or well_known_probes rather than "
+            "trying to parse this HTML directly."
+        )
+    else:
+        note = "Text-to-HTML ratio looks normal for a server-rendered page."
+
     return {
         "html_bytes": size,
         "visible_text_chars": text_len,
+        "script_style_bytes": script_bytes,
         "text_to_html_ratio": round(ratio, 4),
         "time_pattern_hits": time_hits,
         "likely_client_rendered": likely_hydrated,
-        "note": (
-            "Large page, little visible text -- content is probably fetched by JS after "
-            "load. Look for an API call in embedded_data or well_known_probes rather "
-            "than trying to parse this HTML directly."
-            if likely_hydrated
-            else "Text-to-HTML ratio looks normal for a server-rendered page."
-        ),
+        "note": note,
     }
 
 
-def _probe_well_known(base_url: str) -> list[dict]:
+def _probe_well_known(base_url: str) -> tuple[list[dict], str]:
     parsed = urlparse(base_url)
     origin = f"{parsed.scheme}://{parsed.netloc}"
     results = []
+    robots_body = ""
     for path in _WELL_KNOWN_PATHS:
         url = origin + path
         try:
@@ -159,9 +186,35 @@ def _probe_well_known(base_url: str) -> list[dict]:
                 "content_type": resp.headers.get("content-type", ""),
                 "bytes": len(resp.content),
             })
+            if path == "/robots.txt" and resp.status_code < 400:
+                robots_body = resp.text
         except Exception as e:  # noqa: BLE001 -- recon should never crash on a dead probe
             results.append({"url": url, "status": None, "error": str(e)})
-    return results
+    return results, robots_body
+
+
+def _relevant_robots_rules(robots_txt: str) -> list[str]:
+    """Rules that apply to us: the `*` group plus any group naming this tool.
+
+    Reported rather than enforced -- the point is that whoever is about to write an
+    adapter for this host sees the site's stated crawl rules and decides deliberately.
+    Without this, recon printed only a 200 status and the rules stayed invisible.
+    """
+    if not robots_txt:
+        return []
+    applies = False
+    out: list[str] = []
+    for raw in robots_txt.splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if not line or ":" not in line:
+            continue
+        field, _, value = line.partition(":")
+        field, value = field.strip().lower(), value.strip()
+        if field == "user-agent":
+            applies = value == "*" or "conference_connector" in value.lower()
+        elif applies and field in ("disallow", "allow", "crawl-delay"):
+            out.append(f"{field.title()}: {value}" if value else f"{field.title()}: (empty)")
+    return out
 
 
 def recon(url: str, max_links: int = 30, probe: bool = True) -> dict:
@@ -181,7 +234,9 @@ def recon(url: str, max_links: int = 30, probe: bool = True) -> dict:
         "programme_links": _classify_links(html, str(resp.url), max_links),
     }
     if probe:
-        report["well_known_probes"] = _probe_well_known(str(resp.url))
+        probes, robots_body = _probe_well_known(str(resp.url))
+        report["well_known_probes"] = probes
+        report["robots_rules"] = _relevant_robots_rules(robots_body)
     return report
 
 
@@ -207,7 +262,8 @@ def format_report(report: dict) -> str:
     h = report["hydration"]
     lines.append(
         f"hydration check: {h['html_bytes']} bytes html, {h['visible_text_chars']} chars "
-        f"visible text (ratio {h['text_to_html_ratio']}), {h['time_pattern_hits']} time-pattern hits"
+        f"visible text, {h['script_style_bytes']} bytes script/style "
+        f"(ratio {h['text_to_html_ratio']}), {h['time_pattern_hits']} time-pattern hits"
     )
     lines.append(f"  -> {h['note']}")
 
@@ -220,6 +276,15 @@ def format_report(report: dict) -> str:
                 lines.append(f"  [{status}] {p['url']}  ({p.get('content_type', '')}, {p.get('bytes', 0)}B)")
             else:
                 lines.append(f"  [{status or 'ERR'}] {p['url']}")
+
+    if report.get("robots_rules"):
+        lines.append("")
+        lines.append("robots.txt rules that apply to this tool (read before scraping):")
+        for rule in report["robots_rules"]:
+            lines.append(f"  {rule}")
+    elif "robots_rules" in report:
+        lines.append("")
+        lines.append("robots.txt: no rules found that apply to this tool (or no robots.txt).")
 
     lines.append("")
     if report["programme_links"]:

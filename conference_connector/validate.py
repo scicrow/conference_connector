@@ -45,6 +45,18 @@ def validate(items: list[Item], expected_min_total: int | None = None) -> dict:
     for it in items:
         by_kind[it.kind].append(it)
 
+    # An adapter that returns nothing is the loudest possible failure, not a pass --
+    # it's the default state of a half-written parser, and every other check below is
+    # vacuously satisfied by an empty list. Report it and stop.
+    if not items:
+        issues.append(
+            "Adapter returned 0 items. Nothing below could run. Check that fetch_all() "
+            "is reaching the right URL, that the response is what you expect (look at "
+            "the cached file under data/raw/), and that your entry-splitting pattern "
+            "still matches the live markup."
+        )
+        return {"total": 0, "kinds": {}, "issues": issues}
+
     if expected_min_total is not None and len(items) < expected_min_total:
         issues.append(
             f"Only {len(items)} items total, expected at least {expected_min_total}. "

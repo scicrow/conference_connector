@@ -21,7 +21,7 @@ against a raw kind breakdown before trusting the defaults.
 
 The output (candidates_for_review.md) is for a human or an LLM-in-the-loop session to
 read directly and hand-write item_scores.json from -- see
-skills/conference-scout/references/close-reading.md.
+conference_connector/skills/conference-scout/references/close-reading.md.
 """
 from __future__ import annotations
 
@@ -136,6 +136,12 @@ def write_candidates(candidates: list[dict]) -> None:
 
 
 def main() -> None:
+    from conference_connector.ingest import items_path
+    from conference_connector.preconditions import require_config, require_file
+
+    require_config("threads")
+    require_file(items_path(), "conference_connector ingest <adapter>", "the ingested item list")
+
     items = load_items()
     candidates = prefilter(items)
     write_candidates(candidates)

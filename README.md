@@ -24,25 +24,29 @@ agent.
   (or `pip install -e /path/to/conference_connector` if you've cloned it locally and
   want to edit it)
 
-- [ ] **Make a project directory** for this conference -- separate from this repo, one
-  per conference/profile you scout
+- [ ] **Scaffold a project directory** for this conference -- separate from this repo,
+  one per conference/profile you scout
   ```
   mkdir my-conference-scout && cd my-conference-scout
-  mkdir -p config data outputs
+  conference_connector init
+  ```
+  This creates `config/`, `data/`, `outputs/`, a starter `config/config.yaml`, and a
+  commented `my_adapter.py` to edit later.
+
+- [ ] **Install the skill** (recommended -- it's what writes your config and adapter
+  for you)
+  ```
+  conference_connector install-skill          # into ./.claude/skills
+  conference_connector install-skill --user   # or ~/.claude/skills, for every project
   ```
 
-- [ ] **Get a config.yaml.** Preferred: open this project directory with an agent
-  that has the `conference-scout` skill and tell it about the conference and what
-  you're trying to get out of it -- it interviews you and writes `config/config.yaml`
-  for you, including real keyword lists (not just topic names -- the vocabulary
-  someone else might use for the same idea). Manual fallback:
-  ```
-  curl -o config/config.yaml https://raw.githubusercontent.com/scicrow/conference_connector/main/config/config.example.yaml
-  ```
-  and rewrite every field yourself -- who you are, your research threads and their
-  keywords, and (only if your goal has a geography/institution angle) the `ranking`
-  tier lists. This file is the one step that actually shapes your results; don't
-  leave the placeholder text in.
+- [ ] **Fill in `config/config.yaml`.** Preferred: start an agent session in this
+  directory and tell it about the conference and what you want out of it -- the skill
+  interviews you and writes the file, including real keyword lists (not just topic
+  names, but the vocabulary *other people* would use for the same idea). Otherwise
+  edit it by hand: your research threads and their keywords, and -- only if your goal
+  has a geography/institution angle -- the `ranking` tier lists. **This is the one
+  step that actually shapes your results**; the placeholder text matches nothing.
 
 - [ ] *(Optional)* **Add your own contact.** By default the tool identifies itself to
   scraped sites with just its own name and GitHub URL -- nothing personal required.
@@ -58,20 +62,32 @@ agent.
   another `recon` call. This is a deliberate, explicit checkpoint -- see
   [Recon: the checkpoint](#recon-the-checkpoint) below.
 
-- [ ] **Get an adapter** -- either reuse `eccb2026` (if you're literally attending ECCB
-  2026) or write a new one for your conference. Writing one is the part most worth
-  doing with an agent driving the `conference-scout` skill; see
-  `skills/conference-scout/references/adapter-authoring.md` either way.
+- [ ] **Get an adapter.** If you're attending ECCB 2026, skip this -- use the bundled
+  `eccb2026` slug. Otherwise you write one: it's the only bespoke code in the whole
+  pipeline, because it's the only part that depends on one conference's markup. Its
+  entire contract is `SLUG` + `fetch_all(refresh) -> list[Item]`.
+  - `init` already gave you `my_adapter.py` with three marked `EDIT` points.
+  - Point it at whatever `recon` found, then run it directly to check your work
+    *before* wiring it into the pipeline:
+    ```
+    python my_adapter.py     # parses from cache, compares entry count, runs validation
+    ```
+  - Expect a couple of rounds of this -- adapter bugs are silent by nature, which is
+    why the template validates instead of just printing a count. The bug catalogue in
+    `conference_connector/skills/conference-scout/references/adapter-authoring.md` is
+    worth reading first; an agent with the skill installed will work through it for you.
 
 - [ ] **Run the pipeline**
   ```
   conference_connector ingest <adapter-slug>
-  conference_connector validate <adapter-slug>
+  conference_connector validate <adapter-slug>   # check this before investing in a close read
   conference_connector prefilter
   # --- read data/interim/candidates_for_review.md, hand-write data/processed/item_scores.json ---
   conference_connector rank
   conference_connector render
   ```
+  Commands check their own preconditions, so running one out of order tells you which
+  one to run first rather than raising.
 
 - [ ] **Check `outputs/`** -- `shortlist.md` and `people.md` are the main deliverables;
   `items.csv` / `people.csv` are the same data for a spreadsheet.
@@ -92,11 +108,13 @@ above didn't make sense, the answer is probably in one of the sections below.
 ## The pipeline, in full
 
 ```
+conference_connector init               # scaffold config/ data/ outputs/ + starter config & adapter
+conference_connector install-skill      # copy the conference-scout skill into .claude/skills
 conference_connector recon <url>        # look before you scrape -- explicit, separate, run first
 conference_connector ingest <adapter>   # adapter -> data/interim/items.jsonl
+conference_connector validate <adapter> # sanity-check adapter output (coverage, mojibake, outliers)
 conference_connector prefilter          # keyword filter -> data/interim/candidates_for_review.md
 # --- read candidates_for_review.md, hand-write data/processed/item_scores.json ---
-conference_connector validate <adapter> # sanity-check adapter output (coverage, mojibake, outliers)
 conference_connector rank               # item_scores.json -> data/processed/people.json
 conference_connector render             # -> outputs/{shortlist,people}.md, {items,people}.csv
 conference_connector card [--tiers A,B] [--pdf]  # -> outputs/reference_card.{html,pdf}
@@ -110,7 +128,7 @@ one you made in the Quickstart above.
 
 There is no automated LLM-scoring step. Scoring hundreds of abstracts against a chat
 subscription (not API credits) means a human or an LLM-in-the-loop session actually
-reads them -- see `skills/conference-scout/references/close-reading.md`.
+reads them -- see `conference_connector/skills/conference-scout/references/close-reading.md`.
 
 ### The reference card
 
@@ -120,7 +138,7 @@ readable on a phone during the event itself: a day-by-day schedule across everyo
 included, plus one card per person with their items' day/time/room/board.
 
 It reads `outputs/dossiers/*.md` opportunistically -- if a project has hand-written
-dossiers (see `skills/conference-scout/references/outreach-writing.md`), their hook/
+dossiers (see `conference_connector/skills/conference-scout/references/outreach-writing.md`), their hook/
 opening-line/ask sections get pulled in verbatim (matched by loose keyword, not an
 exact header, so different dossier-writing styles still work); anyone without one
 still gets a card, using `item_scores.json`'s `why` for their best-scoring item as the
@@ -153,7 +171,7 @@ just `eccb2026` (ECCB 2026 specifically -- not a generic ISCB-platform adapter; 
 module docstring for why).
 
 For anything else: run `recon`, read
-`skills/conference-scout/references/adapter-authoring.md`, and write a project-local
+`conference_connector/skills/conference-scout/references/adapter-authoring.md`, and write a project-local
 adapter against `conference_connector.adapters.base.Adapter`. Register it with
 `conference_connector.adapters.register("your-slug", your_module)` before calling the
 CLI (a one-line bootstrap script in your project works fine), or point the CLI at it
@@ -168,7 +186,7 @@ in code: reproducible, auditable, and the same every time you re-run it.
 Everything upstream of that -- figuring out where a given conference's data lives,
 writing the adapter, close-reading the shortlisted abstracts, writing outreach
 strategy -- is judgement. That belongs to an agent working through the
-`conference-scout` skill (see `skills/conference-scout/SKILL.md`), not to a script.
+`conference-scout` skill (see `conference_connector/skills/conference-scout/SKILL.md`), not to a script.
 
 That includes `config.yaml` itself: you shouldn't have to hand-write YAML to describe
 your own research interests, so the intended way to get one is to just tell an agent
@@ -177,6 +195,34 @@ rather than a fresh prompt on every run, though -- `ingest`, `prefilter`, and `r
 are separate commands, often run hours or days apart while you tune a weight, and
 something has to hold the answer in between. A file also means you can inspect and
 edit it directly to nudge the ranking, without a full re-interview each time.
+
+## Troubleshooting
+
+**"Missing the ingested item list" / "No config found"** -- a stage ran before the one
+that produces its input. The message names the command to run first. Nothing is
+corrupted; just run that and retry.
+
+**`validate` says the adapter returned 0 items** -- your `fetch_all()` ran but parsed
+nothing. Open the cached response under `data/raw/` and check that (a) it's the page
+you expected rather than a login wall or JS shell, and (b) your entry-splitting
+pattern still matches the live markup.
+
+**Parsed far fewer items than the page shows** -- the most common adapter bug, and
+always silent. Count your entry marker in the raw HTML and compare to what you
+returned (`python my_adapter.py` does this for you). Two frequent causes: one
+structural block actually containing several logical items, and an ID/code regex that
+doesn't match every variant the site uses.
+
+**Names come out as `Ã©`/`â€™` mojibake** -- run every extracted string through
+`clean_text()` before anything else touches it, including before using a name as a
+dict key. Corrupted names silently split one person into two in the ranking.
+
+**`recon` says a page is client-rendered** -- don't reach for a headless browser yet.
+Check the `embedded_data_markers` and `well_known_probes` lines first; the data is
+usually in a JSON blob in that same HTML or behind a plain REST endpoint.
+
+**No PDF from `card --pdf`** -- no Chrome/Chromium was found. The HTML is complete and
+usable; open it and use Print > Save as PDF.
 
 ## What this doesn't do
 

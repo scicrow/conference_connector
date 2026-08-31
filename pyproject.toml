@@ -20,3 +20,14 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["conference_connector*"]
+
+# The config template and the conference-scout skill are shipped inside the package,
+# not left at the repo root: a `pip install` user needs both (the README's primary
+# install path is pip, and both `init` and `install-skill` copy from here), and
+# anything outside the package directory silently does not make it into the wheel.
+[tool.setuptools.package-data]
+conference_connector = [
+    "templates/*.yaml",
+    "templates/*.py",
+    "skills/**/*.md",
+]
