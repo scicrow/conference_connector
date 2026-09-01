@@ -24,6 +24,7 @@ import os
 import re
 import shutil
 import subprocess
+import unicodedata
 from pathlib import Path
 
 from conference_connector import config
@@ -237,6 +238,10 @@ def build_card_data(
         out.append({
             "name": p["name"],
             "tier": p["tier"],
+            # Kept so the day-by-day schedule can be rebuilt per *item* rather than
+            # per person -- `items` below is already merged by slot and no longer
+            # carries item identity, so it can't be de-duplicated across people.
+            "item_ids": list(p["item_ids"]),
             "affiliation": p["affiliation"] or "affiliation not listed",
             "geo": geo_labels.get(p["geography_tier"], ""),
             "roles": [ROLE_LABEL.get(r, r) for r in p["roles"]],
@@ -296,43 +301,203 @@ def _person_card_html(p: dict) -> str:
 
 UNSCHEDULED_HEADING = "Day/time not listed in the programme"
 
+# Order the kind sections within a day. Fixed rather than data-driven so the card
+# reads the same every day of the conference: the things with a hard start time
+# first, then the poster sessions you graze, then the all-day teaching formats.
+KIND_ORDER = ["keynote", "talk", "poster", "tutorial", "workshop"]
+KIND_HEADINGS = {
+    "keynote": "Keynotes",
+    "talk": "Talks",
+    "poster": "Posters",
+    "tutorial": "Tutorials",
+    "workshop": "Workshops",
+}
 
-def _quick_index_html(people: list[dict]) -> str:
-    # (sort_time, name, tier, item) -- tier is carried here rather than looked up
-    # later, both to avoid rescanning `people` per row and because a name lookup
-    # would silently pick the wrong person if two attendees share a name.
-    by_day: dict[str, list[tuple]] = {}
+# A poster hall is walkable at roughly this many boards per session before it stops
+# being a conversation and starts being a corridor. Posters beyond the cut are still
+# on the person cards below; only this at-a-glance view is capped.
+DEFAULT_MAX_POSTERS_PER_DAY = 10
+
+_TIER_RANK = {"A": 0, "B": 1, "C": 2}
+
+
+def _name_tokens(name: str) -> tuple[str, ...]:
+    """Accent-stripped, initial-free name tokens, for spotting the same person spelled
+    two ways in one author list."""
+    folded = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode()
+    return tuple(t for t in re.split(r"[^a-z0-9]+", folded.lower()) if len(t) > 1)
+
+
+def _same_person(a: str, b: str) -> bool:
+    """True when two author strings are near-certainly one person.
+
+    Source author lists are not normalised: the same person turns up as both
+    "Anais Mottaz" and "Anaïs Mottaz", or as "Ian Simpson" and "T. Ian Simpson",
+    and `rank` treats those as two people. That is tolerable in a ranked list but
+    not on a schedule row, where the point is to name everyone worth catching at one
+    board -- listing the same person twice there is simply wrong.
+
+    The test is deliberately narrow: identical token sets, or one a subset of the
+    other with the first and last tokens matching (a dropped middle name). Anything
+    looser starts merging distinct people who share a surname.
+    """
+    ta, tb = _name_tokens(a), _name_tokens(b)
+    if not ta or not tb:
+        return False
+    if ta == tb:
+        return True
+    short, long_ = (ta, tb) if len(ta) < len(tb) else (tb, ta)
+    return set(short) < set(long_) and short[0] == long_[0] and short[-1] == long_[-1]
+
+
+def _dedupe_people(people: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """Collapse spelling variants in one row's author list, keeping the fullest
+    spelling and the strongest tier seen for that person."""
+    out: list[tuple[str, str]] = []
+    for name, tier in people:
+        for i, (kept_name, kept_tier) in enumerate(out):
+            if _same_person(name, kept_name):
+                best_tier = min(kept_tier, tier, key=lambda t: _TIER_RANK.get(t, 99))
+                out[i] = (max(kept_name, name, key=len), best_tier)
+                break
+        else:
+            out.append((name, tier))
+    return out
+
+
+def _item_relevance(score: dict | None) -> float:
+    """Mean of the three close-read axes -- the same aggregate `pivot` uses to turn
+    item scores into a person's relevance, reused here to rank posters within a day."""
+    if not score:
+        return 0.0
+    return (score["topic_fit"] + score["method_overlap"] + score["collab_potential"]) / 3.0
+
+
+def build_schedule_data(
+    people: list[dict], max_posters_per_day: int = DEFAULT_MAX_POSTERS_PER_DAY
+) -> list[dict]:
+    """Day-by-day schedule keyed on *items*, not people.
+
+    One row per poster/talk/session, with every shortlisted person attached to it --
+    the same poster routinely has two or three relevant authors, and listing it once
+    per author turns a day into a list of near-duplicates. Rows are grouped by kind
+    within each day, and posters are capped per day (highest close-read relevance
+    first) because there is a hard limit on how many boards anyone visits in one
+    session. Capped-out posters are counted, not silently dropped: they remain in
+    full on the person cards.
+    """
+    items = {it.item_id: it for it in load_items()}
+    item_scores = {row["item_id"]: row for row in json.loads(item_scores_path().read_text())}
+
+    # item_id -> row, accumulating the people attached to it.
+    rows: dict[str, dict] = {}
     for p in people:
-        for it in p["items"]:
-            day = it["day"] or UNSCHEDULED_HEADING
-            by_day.setdefault(day, []).append(
-                (it.get("_sort", ((99, 99), 0))[1], p["name"], p["tier"], it)
-            )
+        for iid in p["item_ids"]:
+            it = items.get(iid)
+            if it is None:
+                continue
+            row = rows.get(iid)
+            if row is None:
+                d = it.model_dump()
+                day, time, loc = _when_where(d)
+                row = rows[iid] = {
+                    "item_id": iid,
+                    "kind": it.kind,
+                    "title": it.title,
+                    "day": day or UNSCHEDULED_HEADING,
+                    "time": time,
+                    "loc": loc,
+                    "relevance": _item_relevance(item_scores.get(iid)),
+                    "_time": _time_key(it.start),
+                    "people": [],
+                }
+            row["people"].append((p["name"], p["tier"]))
 
-    # Unscheduled items go last, but they must still appear: dropping them meant a
-    # keynote with no parsed day vanished from the schedule view entirely.
-    days_sorted = sorted(
-        by_day.keys(), key=lambda d: (d == UNSCHEDULED_HEADING, _date_key(d))
-    )
+    by_day: dict[str, list[dict]] = {}
+    for row in rows.values():
+        # Best tier present drives the row's badge and its tie-breaks: a poster with
+        # one Tier A author is a Tier A stop even if its other authors rank lower.
+        row["people"] = _dedupe_people(row["people"])
+        row["people"].sort(key=lambda np: (_TIER_RANK.get(np[1], 99), np[0]))
+        row["tier"] = row["people"][0][1]
+        by_day.setdefault(row["day"], []).append(row)
+
+    days_sorted = sorted(by_day, key=lambda d: (d == UNSCHEDULED_HEADING, _date_key(d)))
 
     out = []
     for day in days_sorted:
-        entries = by_day[day]
-        entries.sort(key=lambda e: e[0])
-        out.append(f"<h3 class='day-head'>{_e(day)}</h3>")
-        for _, name, tier, it in entries:
-            color = TIER_COLORS.get(tier, _DEFAULT_TIER_COLOR)[0]
-            title_text = "; ".join(it["titles"])
+        groups = []
+        for kind in KIND_ORDER:
+            kind_rows = [r for r in by_day[day] if r["kind"] == kind]
+            if not kind_rows:
+                continue
+            dropped = 0
+            if kind == "poster" and max_posters_per_day and len(kind_rows) > max_posters_per_day:
+                kind_rows.sort(
+                    key=lambda r: (-r["relevance"], _TIER_RANK.get(r["tier"], 99), r["loc"])
+                )
+                dropped = len(kind_rows) - max_posters_per_day
+                kind_rows = kind_rows[:max_posters_per_day]
+                # Once cut to the shortlist, order by board so the day is walkable.
+                kind_rows.sort(key=lambda r: (r["loc"], -r["relevance"]))
+            elif kind == "poster":
+                kind_rows.sort(key=lambda r: (r["loc"], -r["relevance"]))
+            else:
+                kind_rows.sort(key=lambda r: (r["_time"], r["loc"], r["title"]))
+            groups.append({"kind": kind, "rows": kind_rows, "dropped": dropped})
+        # Any kind not in KIND_ORDER (a format this conference has and we don't know
+        # about) still has to appear rather than vanishing from the schedule.
+        for kind in sorted({r["kind"] for r in by_day[day]} - set(KIND_ORDER)):
+            kind_rows = [r for r in by_day[day] if r["kind"] == kind]
+            kind_rows.sort(key=lambda r: (r["_time"], r["loc"], r["title"]))
+            groups.append({"kind": kind, "rows": kind_rows, "dropped": 0})
+        out.append({"day": day, "groups": groups})
+    return out
+
+
+def _quick_index_html(schedule: list[dict]) -> str:
+    out = []
+    for day in schedule:
+        out.append(f"<h3 class='day-head'>{_e(day['day'])}</h3>")
+        for group in day["groups"]:
+            kind = group["kind"]
+            heading = KIND_HEADINGS.get(kind, kind.capitalize() + "s")
+            count = f"{len(group['rows'])}"
+            if group["dropped"]:
+                count += f" of {len(group['rows']) + group['dropped']}, top-ranked"
             out.append(
-                f"<div class='sched-row'><span class='sched-time'>{_e(it['time'])}</span>"
-                f"<span class='sched-tierbadge' style='background:{color}'>{_e(tier)}</span>"
-                f"<span class='sched-name'>{_e(name)}</span>"
-                f"<span class='sched-what'>{_e(it['kind'].capitalize())} \u00b7 {_e(it['loc'])} \u2014 {_e(title_text)}</span></div>"
+                f"<div class='kind-head'><span class='kind-tag kind-{_e(kind)}'>{_e(heading)}</span>"
+                f"<span class='kind-count'>{_e(count)}</span></div>"
             )
+            for r in group["rows"]:
+                names = ", ".join(name for name, _ in r["people"])
+                color = TIER_COLORS.get(r["tier"], _DEFAULT_TIER_COLOR)[0]
+                # The section heading already says these are posters, so the "Board"
+                # prefix is redundant here and only pushes the ID onto a second line.
+                loc = r["loc"][6:] if kind == "poster" and r["loc"].startswith("Board ") else r["loc"]
+                when = f"{r['time']} \u00b7 {loc}" if r["time"] else loc
+                out.append(
+                    f"<div class='sched-row'><span class='sched-time'>{_e(when)}</span>"
+                    f"<span class='sched-tierbadge' style='background:{color}'>{_e(r['tier'])}</span>"
+                    f"<div class='sched-body'><span class='sched-title'>{_e(r['title'])}</span>"
+                    f"<span class='sched-name'>{_e(names)}</span></div></div>"
+                )
+            if group["dropped"]:
+                out.append(
+                    f"<div class='sched-note'>+{group['dropped']} further {kind}s that day "
+                    f"scored lower \u2014 see the person cards below.</div>"
+                )
     return "\n".join(out)
 
 
-def render_html(people: list[dict], conference_name: str, tiers: tuple[str, ...]) -> str:
+def render_html(
+    people: list[dict],
+    conference_name: str,
+    tiers: tuple[str, ...],
+    schedule: list[dict] | None = None,
+) -> str:
+    if schedule is None:
+        schedule = build_schedule_data(people)
     kind_css = "\n".join(
         f"  .kind-{k} {{ background: {bg}; color: {fg}; }}" for k, (bg, fg) in KIND_COLORS.items()
     )
@@ -362,14 +527,22 @@ def render_html(people: list[dict], conference_name: str, tiers: tuple[str, ...]
   .subtitle {{ color: #555; font-size: 12px; margin-bottom: 14px; }}
   .cover-note {{ background: #f2f2f2; border-radius: 6px; padding: 8px 10px; font-size: 11.5px;
                  color: #333; margin-bottom: 10px; }}
-  .day-head {{ font-size: 13px; margin: 10px 0 4px; color: #444; }}
+  .day-head {{ font-size: 14px; font-weight: 700; margin: 14px 0 2px; color: #222;
+               border-bottom: 1px solid #ccc; padding-bottom: 2px; page-break-after: avoid; }}
+  .kind-head {{ display: flex; align-items: baseline; gap: 6px; margin: 8px 0 2px;
+                page-break-after: avoid; }}
+  .kind-count {{ font-size: 10px; color: #777; }}
+  .kind-head .kind-tag {{ font-size: 11px; padding: 2px 8px; letter-spacing: 0.04em; }}
   .sched-row {{ display: flex; gap: 8px; align-items: baseline; padding: 3px 0;
-                border-bottom: 1px dotted #ddd; font-size: 11.5px; }}
-  .sched-time {{ width: 70px; flex-shrink: 0; color: #555; font-variant-numeric: tabular-nums; }}
+                border-bottom: 1px dotted #ddd; font-size: 11.5px; page-break-inside: avoid; }}
+  .sched-time {{ width: 132px; flex-shrink: 0; color: #555; font-weight: 600;
+                 font-variant-numeric: tabular-nums; }}
   .sched-tierbadge {{ width: 16px; flex-shrink: 0; text-align: center; border-radius: 3px;
                       font-size: 9px; font-weight: 700; padding: 1px 0; color: #fff; }}
-  .sched-name {{ width: 150px; flex-shrink: 0; font-weight: 600; }}
-  .sched-what {{ color: #333; }}
+  .sched-body {{ flex: 1 1 auto; min-width: 0; }}
+  .sched-title {{ display: block; color: #1a1a1a; }}
+  .sched-name {{ display: block; font-size: 10.5px; font-weight: 600; color: #666; }}
+  .sched-note {{ font-size: 10.5px; color: #777; font-style: italic; padding: 3px 0 0 126px; }}
   .card {{ page-break-inside: avoid; border: 1px solid #ddd; border-left: 4px solid #999;
            border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; }}
   .card-head {{ display: flex; justify-content: space-between; align-items: baseline; gap: 6px; }}
@@ -396,8 +569,9 @@ def render_html(people: list[dict], conference_name: str, tiers: tuple[str, ...]
   @media (max-width: 480px) {{
     body {{ font-size: 15px; padding: 6px; }}
     .sched-row {{ flex-wrap: wrap; }}
-    .sched-name {{ width: auto; }}
-    .sched-what {{ flex-basis: 100%; padding-left: 24px; color: #555; }}
+    .sched-time {{ width: auto; }}
+    .sched-body {{ flex-basis: 100%; padding-left: 24px; }}
+    .sched-note {{ padding-left: 24px; }}
     .item-row {{ flex-direction: column; gap: 2px; }}
     .item-loc {{ font-weight: 700; }}
   }}
@@ -412,10 +586,13 @@ def render_html(people: list[dict], conference_name: str, tiers: tuple[str, ...]
   actually approach. {legend_lines}.
   Posters show a board number and the session window it's staffed; talks and tutorials show an
   exact time and room where the source data provides one.
+  The schedule below lists each session once, grouped by format, with everyone worth catching
+  there named on the same line. Posters are capped at the {DEFAULT_MAX_POSTERS_PER_DAY}
+  highest-scoring per day; the rest are on the person cards.
 </div>
 
 <h2>Day-by-day quick schedule</h2>
-{_quick_index_html(people)}
+{_quick_index_html(schedule)}
 
 {"".join(sections_html)}
 
